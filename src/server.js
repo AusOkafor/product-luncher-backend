@@ -133,15 +133,22 @@ async function initializeServices() {
     }
 }
 
-// Start server
-app.listen(PORT, async() => {
-    logger.info(`🚀 Server running on port ${PORT}`)
-    logger.info(`📊 Health check: http://localhost:${PORT}/health`)
-    logger.info(`🔗 API base URL: http://localhost:${PORT}/api`)
+// Start server only if not running on Vercel
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+    app.listen(PORT, async() => {
+        logger.info(`🚀 Server running on port ${PORT}`)
+        logger.info(`📊 Health check: http://localhost:${PORT}/health`)
+        logger.info(`🔗 API base URL: http://localhost:${PORT}/api`)
 
-    // Initialize services after server starts
-    await initializeServices()
-})
+        // Initialize services after server starts
+        await initializeServices()
+    })
+} else {
+    // Initialize services for Vercel
+    initializeServices().catch(error => {
+        logger.error('Error initializing services on Vercel:', error)
+    })
+}
 
 // Graceful shutdown
 async function gracefulShutdown(signal) {

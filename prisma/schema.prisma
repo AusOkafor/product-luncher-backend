@@ -1,0 +1,537 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========================================
+// USER MANAGEMENT
+// ========================================
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  firstName     String?
+  lastName      String?
+  avatar        String?
+  role          UserRole @default(USER)
+  isActive      Boolean  @default(true)
+  emailVerified Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  workspaces    WorkspaceMember[]
+  accountProviders AccountProvider[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model AccountProvider {
+  id              String   @id @default(cuid())
+  userId          String
+  provider        String   // "google", "github", "shopify", etc.
+  providerUserId  String
+  accessToken     String?
+  refreshToken    String?
+  expiresAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("account_providers")
+}
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  plan        Plan     @default(STARTER)
+  status      WorkspaceStatus @default(ACTIVE)
+  ownerId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  members     WorkspaceMember[]
+  stores      Store[]
+  launches    Launch[]
+  campaigns   Campaign[]
+  events      Event[]
+  messages    Message[]
+  embeddings  Embedding[]
+  billingCustomer BillingCustomer?
+  subscriptions Subscription[]
+  usage       Usage[]
+  auditLogs   AuditLog[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        MemberRole @default(VIEWER)
+  joinedAt    DateTime @default(now())
+
+  // Relations
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+// ========================================
+// E-COMMERCE DATA
+// ========================================
+
+model Store {
+  id          String   @id @default(cuid())
+  workspaceId String
+  platform    Platform
+  name        String
+  domain      String?
+  accessToken String?
+  refreshToken String?
+  status      StoreStatus @default(ACTIVE)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  products    Product[]
+  customers   Customer[]
+  orders      Order[]
+  carts       Cart[]
+
+  @@map("stores")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  storeId     String
+  title       String
+  description String?
+  category    String?
+  brand       String?
+  price       Decimal  @db.Decimal(10, 2)
+  sku         String?
+  images      String[] // Array of image URLs
+  attributes  Json?    // Product attributes as JSON
+  status      ProductStatus @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  variants    Variant[]
+  launches    Launch[]
+
+  @@map("products")
+}
+
+model Variant {
+  id        String   @id @default(cuid())
+  productId String
+  options   Json     // Variant options (size, color, etc.)
+  price     Decimal  @db.Decimal(10, 2)
+  stock     Int      @default(0)
+  sku       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("variants")
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  storeId   String
+  email     String?
+  phone     String?
+  firstName String?
+  lastName  String?
+  country   String?
+  traits    Json?    // Customer traits and preferences
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orders    Order[]
+  carts     Cart[]
+
+  @@map("customers")
+}
+
+model Order {
+  id         String   @id @default(cuid())
+  storeId    String
+  customerId String?
+  items      Json     // Order items as JSON
+  total      Decimal  @db.Decimal(10, 2)
+  status     OrderStatus @default(PENDING)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  returnRisk ReturnRisk?
+
+  @@map("orders")
+}
+
+model Cart {
+  id        String   @id @default(cuid())
+  storeId   String
+  customerId String?
+  items     Json     // Cart items as JSON
+  subtotal  Decimal  @db.Decimal(10, 2)
+  status    CartStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customer  Customer? @relation(fields: [customerId], references: [id])
+  abandonedCart AbandonedCart?
+
+  @@map("carts")
+}
+
+// ========================================
+// AI/ML DATA
+// ========================================
+
+model Launch {
+  id          String   @id @default(cuid())
+  workspaceId String
+  productId   String?
+  name        String
+  status      LaunchStatus @default(DRAFT)
+  inputs      Json     // Launch inputs (product URL, brand tone, etc.)
+  outputs     Json?    // Generated assets
+  scheduleAt  DateTime?
+  metrics     Json?    // Performance metrics
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  product     Product?  @relation(fields: [productId], references: [id])
+  adCreatives AdCreative[]
+
+  @@map("launches")
+}
+
+model AdCreative {
+  id        String   @id @default(cuid())
+  launchId  String
+  platform  String   // "meta", "tiktok", "google"
+  inputs    Json     // Creative inputs
+  outputs   Json?    // Generated creative assets
+  status    AdCreativeStatus @default(DRAFT)
+  metrics   Json?    // Performance metrics
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  launch    Launch   @relation(fields: [launchId], references: [id], onDelete: Cascade)
+
+  @@map("ad_creatives")
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  workspaceId String
+  channel   MessageChannel
+  to        String   // Recipient (phone, email, etc.)
+  from      String   // Sender
+  direction MessageDirection
+  body      String
+  metadata  Json?    // Message metadata
+  status    MessageStatus @default(PENDING)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model AbandonedCart {
+  id            String   @id @default(cuid())
+  cartId        String   @unique
+  probability   Float    // Abandonment probability (0-1)
+  reasons       Json?    // Reasons for abandonment
+  lastContactAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  cart          Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@map("abandoned_carts")
+}
+
+model ReturnRisk {
+  id             String   @id @default(cuid())
+  orderId        String   @unique
+  probability    Float    // Return probability (0-1)
+  factors        Json?    // Risk factors
+  recommendation Json?    // Prevention recommendations
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("return_risks")
+}
+
+model Embedding {
+  id         String   @id @default(cuid())
+  workspaceId String
+  entityType String   // "product", "customer", "content"
+  entityId   String
+  // vector     Unsupported("vector(1536)") // pgvector column - temporarily disabled
+  model      String   // Embedding model used
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  // Relations
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, entityType, entityId])
+  @@map("embeddings")
+}
+
+// ========================================
+// ANALYTICS & BILLING
+// ========================================
+
+model Event {
+  id          String   @id @default(cuid())
+  workspaceId String
+  type        String   // Event type
+  payload     Json     // Event data
+  ts          DateTime @default(now())
+
+  // Relations
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("events")
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  workspaceId String
+  type        CampaignType
+  name        String
+  status      CampaignStatus @default(DRAFT)
+  metrics     Json?    // Campaign metrics
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("campaigns")
+}
+
+model BillingCustomer {
+  id               String   @id @default(cuid())
+  workspaceId      String   @unique
+  stripeCustomerId String   @unique
+  email            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("billing_customers")
+}
+
+model Subscription {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  plan              Plan
+  status            SubscriptionStatus @default(ACTIVE)
+  stripeSubscriptionId String? @unique
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+model Usage {
+  id          String   @id @default(cuid())
+  workspaceId String
+  metric      String   // "launch.generations", "ads.variants", etc.
+  quantity    Int
+  periodStart DateTime
+  periodEnd   DateTime
+  createdAt   DateTime @default(now())
+
+  // Relations
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("usage")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  actorId     String
+  action      String   // Action performed
+  target      String   // Target resource
+  diff        Json?    // Changes made
+  ts          DateTime @default(now())
+
+  // Relations
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor       User     @relation(fields: [actorId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// ========================================
+// ENUMS
+// ========================================
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum Plan {
+  STARTER
+  GROWTH
+  PRO
+}
+
+enum WorkspaceStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum Platform {
+  SHOPIFY
+  WOOCOMMERCE
+  CUSTOM
+}
+
+enum StoreStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURNED
+}
+
+enum CartStatus {
+  ACTIVE
+  ABANDONED
+  CONVERTED
+}
+
+enum LaunchStatus {
+  DRAFT
+  GENERATING
+  COMPLETED
+  FAILED
+  SCHEDULED
+}
+
+enum AdCreativeStatus {
+  DRAFT
+  GENERATING
+  COMPLETED
+  FAILED
+  PUBLISHED
+}
+
+enum MessageChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum CampaignType {
+  LAUNCH
+  ADS
+  EMAIL
+  SOCIAL
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  UNPAID
+}

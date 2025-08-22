@@ -9,7 +9,7 @@ export default async function handler(req, res) {
 
     try {
         const shopifyOrder = req.body
-        
+
         // Debug: Log the webhook payload
         logger.info(`Webhook: Order created - ${shopifyOrder && shopifyOrder.id ? shopifyOrder.id : 'NO_ID'}`)
         logger.info(`Webhook payload: ${JSON.stringify(shopifyOrder, null, 2)}`)
